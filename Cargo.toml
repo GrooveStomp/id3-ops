@@ -5,3 +5,4 @@ authors = ["GrooveStomp <aaronoman@protonmail.com>"]
 
 [dependencies]
 id3 = "0.1.11"
+glob = "*"

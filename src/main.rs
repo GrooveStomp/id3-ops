@@ -1,110 +1,121 @@
-//#![allow(unused_imports)]
-#![allow(unused_must_use)]
+extern crate glob;
 extern crate id3;
 
-use id3::Tag;
-use std::{fs,env};
-use std::ffi::OsStr;
+use std::env;
 use std::path::Path;
-use std::borrow::Cow;
-use std::io::Error;
+use glob::glob;
+use id3::Tag;
 
-fn print_tag(tag: &Tag) {
-    let frames = tag.frames();
-    println!("Tag:");
-    for frame in frames {
-        println!("\t{}", frame.text().unwrap());
+fn files_in(dir: &str) -> Box<Vec<String>> {
+    let mut files = Box::new(Vec::new());
+
+    for entry in glob(dir).expect("Failed to read glob") {
+        match entry {
+            Ok(path) => {
+                files.push(String::from(path.to_string_lossy()));
+            },
+            Err(e) => println!("Error: {:?}", e),
+        }
     }
+
+    return files;
 }
 
-fn read_tag(path: &Path, _: &mut Tag) -> Result<(),String> {
-    match Tag::read_from_path(path) {
-        Ok(tag) => {
-            print_tag(&tag);
-            return Ok(());
-        },
-        Err(err) => {
-            return Err(String::from(err.description));
-        },
+fn artist_album_file(path: &Path) -> Option<(String, String, String)> {
+    let components = path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>();
+
+    let compno = components.len();
+    if compno < 3 {
+        return None;
     }
+
+    let wanted = components.iter().skip(compno - 3).collect::<Vec<_>>();
+
+    let (artist, album, file) = (wanted[0].clone(), wanted[1].clone(), wanted[2].clone());
+
+    return Some((String::from(artist),String::from(album),String::from(file)))
 }
 
-fn write_tag(path: &Path, tag: &mut Tag) -> Result<(),String> {
-    // Should read existing tag first, then update with new info.
-    let file_name = Cow::from(path.file_name().unwrap().to_str().unwrap());
+fn track_and_title(filename: String) -> Option<(u32, String)> {
+    let filename = filename.clone();
+    let mut space_splits = filename.split_whitespace();
 
-    let no_ext = file_name.split('.').collect::<Vec<_>>()[0];
+    let track: &str;
+    match space_splits.nth(0) {
+        Some(t) => track = t,
+        None => return None,
+    }
 
-    let mut no_spaces = no_ext.split_whitespace();
+    let title = space_splits.collect::<Vec<_>>().join(" ");
 
-    let track = no_spaces.nth(0).unwrap();
-    let title = no_spaces.collect::<Vec<_>>().join(" ");
+    return Some((track.parse::<u32>().unwrap(), String::from(title)));
+}
 
-    tag.set_track(track.parse::<u32>().unwrap());
-    tag.set_title(title);
-
-    match tag.write_to_path(path) {
-        Ok(()) => return Ok(()),
-        Err(err) => {
-            return Err(String::from(err.description));
+fn read_tags(files: &Box<Vec<String>>) {
+    for f in files.iter() {
+        if let Some(tag) = Tag::read_from_path(Path::new(f)).ok() {
+            let frames = tag.frames();
+            println!("Tag:");
+            for frame in frames {
+                if let Some(text) = frame.text() {
+                    println!("\t{}: {}", frame.id, text)
+                }
+            }
         }
     }
 }
 
-fn parse_directory(music_dir: &OsStr, func: &Fn(&Path, &mut Tag) -> Result<(),String>) -> Result<(),Error> {
+fn write_tags(files: &Box<Vec<String>>) {
+    for f in files.iter() {
+        let path = Path::new(f);
+        match artist_album_file(path) {
+            None => println!("Couldn't find song info from path."),
+            Some((artist,album,file)) => {
 
-    // TODO: Instead of recursing like this, just find all files and chop up the path name.
+                match track_and_title(file) {
+                    None => println!(", Couldn't find track and title."),
+                    Some((track, title)) => {
+                        let mut tag = Tag::with_version(2);
+                        match Tag::read_from_path(path) {
+                            Ok(read_tag) => tag = read_tag,
+                            Err(_) => println!("Couldn't read tag!"),
+                        }
 
-    let mut id3v2_2 = Tag::with_version(2);
+                        tag.set_artist(artist);
+                        tag.set_album(album);
+                        tag.set_track(track);
+                        tag.set_title(title);
 
-    for artist in try!(fs::read_dir(music_dir)) {
-        let artist = try!(artist);
-        let file_type = try!(artist.file_type());
-        if file_type.is_dir() {
-            id3v2_2.set_artist(artist.file_name().into_string().unwrap());
-
-            for album in try!(fs::read_dir(artist.path())) {
-                let album = try!(album);
-                let file_type = try!(album.file_type());
-                if file_type.is_dir() {
-                    id3v2_2.set_album(album.file_name().into_string().unwrap());
-
-                    for song in try!(fs::read_dir(album.path())) {
-                        let song = try!(song);
-                        let file_type = try!(song.file_type());
-                        if file_type.is_file() {
-
-                            func(&song.path(), &mut id3v2_2);
-                        }}}}}}
-
-    Ok(())
+                        match tag.write_to_path(path) {
+                            Ok(()) => return,
+                            Err(e) => println!("{}", e),
+                        }
+                    },
+                }
+            },
+        }
+    }
 }
 
 fn main() {
-
     let args: Vec<_> = env::args().collect();
-    if args.len() < 2 {
+    if args.len() < 3 {
         usage(&args[0]);
         return;
     }
 
-    let path = OsStr::new("/home/aaron/Music/test/");
+    let path = Path::new(&args[2]).join("**").join("*.mp3");
+    let files = files_in(path.to_str().unwrap());
 
     if args[1] == "r" || args[1] == "read" {
-        parse_directory(path, &read_tag);
+        read_tags(&files);
     }
     else if args[1] == "w" || args[1] == "write" {
-        parse_directory(path, &write_tag);
+        write_tags(&files);
     }
     else if args[1] == "rw" || args[1] == "wr" || args[1] == "readwrite" || args[1] == "writeread" {
-        let closure = |path: &Path, tag: &mut Tag| {
-            match write_tag(path, tag) {
-                Ok(())   => return read_tag(path, tag),
-                Err(err) => return Err(err),
-            }
-        };
-
-        parse_directory(path, &closure);
+        write_tags(&files);
+        read_tags(&files);
     }
 }
 
