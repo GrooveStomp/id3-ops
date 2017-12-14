@@ -61,7 +61,7 @@ When writing id3 data, the directory structure is assumed to look like this:
             └─ ## Title.mp3
 
 Where '##' is the track's position within the arrangement of songs on the album,
-followed by a space, folloed by the song name.
+followed by a space, followed by the song name.
 
 SUBCOMMAND:
 
