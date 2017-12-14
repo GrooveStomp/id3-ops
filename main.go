@@ -1,9 +1,9 @@
 package main
 
 import (
+	"fmt"
 	id3 "github.com/mikkyang/id3-go"
 	id3v2 "github.com/mikkyang/id3-go/v2"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,7 +116,7 @@ func infoFromPath(path string) []string {
 	ext := filepath.Ext(title)
 	title = strings.Replace(title, ext, "", 1)
 
-	return []string{artist,album,title,track}
+	return []string{artist, album, title, track}
 }
 
 func write(path string, info os.FileInfo, err error) error {
